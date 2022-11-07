@@ -42,6 +42,10 @@ if __name__ == "__main__":
                         type=str,
                         nargs='?',
                         default="out.csv")
+    parser.add_argument("--debug",
+                        help="Flag for debugging purposes",
+                        action="store_true",
+                        default=False)
 
     args = parser.parse_args()
 
@@ -67,9 +71,11 @@ if __name__ == "__main__":
     temps      = []
     pressures  = []
     voltages   = []
+    names      = []
     units      = []
     for line in lines:
-        print(line)
+        if args.debug:
+            print(line)
         splitted = line.split(' ')
         if splitted[0].__contains__("Ruuvi"):
             dev = line[line.find("device")+7:line.find(",")]
@@ -79,7 +85,8 @@ if __name__ == "__main__":
                 temps.append([])
                 pressures.append([])
                 voltages.append([])
-                print(dev)
+                if args.debug:
+                    print("Found a new device:",dev)
             else:
                 if devices.count(dev)==0:
                     devices.append(dev)
@@ -87,31 +94,73 @@ if __name__ == "__main__":
                     temps.append([])
                     pressures.append([])
                     voltages.append([])
-                    print(dev)
+                    if args.debug:
+                        print("Found a new device:",dev)
         elif splitted[0].__contains__("Humidity"):
+            bCheckUnits=False
+            if len(names)==0:
+                names.append(splitted[0][1:len(splitted[0])-1]) #First one has tab in front
+                names.append(splitted[2][:len(splitted[2])-1])
+                names.append(splitted[4][:len(splitted[4])-1])
+                names.append(splitted[6]+' '+splitted[7][:len(splitted[7])-1])
+                bCheckUnits=True
             (pos, unit) = findUnit(splitted[1])
-            units.append(unit)
+            if bCheckUnits:
+                units.append(unit)
             humidities[devices.index(dev)].append(float(splitted[1][:pos]))
             (pos, unit) = findUnit(splitted[3])
-            units.append(unit)
+            if bCheckUnits:
+                units.append(unit)
             temps[devices.index(dev)].append(float(splitted[3][:pos]))
             (pos, unit) = findUnit(splitted[5])
-            units.append(unit)
+            if bCheckUnits:
+                units.append(unit)
             pressures[devices.index(dev)].append(int(splitted[5][:pos]))
             (pos, unit) = findUnit(splitted[8])
-            units.append(unit)
+            if bCheckUnits:
+                units.append(unit)
             voltages[devices.index(dev)].append(int(splitted[8][:pos]))
             
-    print(median(humidities[0]),median(humidities[1]),humidities)
-    print(temps)
-    print(pressures)
-    print(voltages)
+    if args.debug:
+        print("Printing medians and values gathered")
+        print(names)
+        print(units)
+        print(median(humidities[0]),median(humidities[1]),humidities)
+        print(median(temps[0]),median(temps[1]),temps)
+        print(median(pressures[0]),median(pressures[1]),pressures)
+        print(median(voltages[0]),median(voltages[1]),voltages)
 
     if args.init:
         print("Initializing a new file {}...".format(args.file))
+        #TODO: check if file exists already.
+        with open(args.file, 'w', encoding="utf-8") as fil:
+            for devnum,iDev in enumerate(devices):
+                fil.write(iDev)
+                if devnum!=len(devices)-1:
+                    fil.write(',')
+            fil.write('\n')
+            for devnum,iDev in enumerate(devices):
+                for num,(iName,iUnit) in enumerate(zip(names,units)):
+                    fil.write("{}[{}]".format(iName,iUnit))
+                    if devnum!=len(devices)-1 or num!=len(names)-1:
+                        fil.write(',')
+            fil.write('\n')
+    else:
+        #Check that the devices and units are the same.
+        pass
 
+    #TODO: Need a check for the order of devices.
 
-
-    #print(shOutput)
-
+    with open(args.file, 'a', encoding="utf-8") as fil:
+        for devnum,iDev in enumerate(devices):
+            fil.write("{:.2f}".format(median(humidities[devnum])))
+            fil.write(',')
+            fil.write("{:.2f}".format(median(temps[devnum])))
+            fil.write(',')
+            fil.write("{:.0f}".format(median(pressures[devnum])))
+            fil.write(',')
+            fil.write("{:.0f}".format(median(voltages[devnum])))
+            if devnum!=len(devices)-1:
+                fil.write(',')
+        fil.write('\n')
 
