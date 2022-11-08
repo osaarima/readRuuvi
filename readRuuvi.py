@@ -22,6 +22,7 @@ if __name__ == "__main__":
     #import os
     import subprocess
     from statistics import median
+    from datetime import datetime
 
     parser = argparse.ArgumentParser(description="Reads RuuviTag information once every five minutes and saves it in a file.",
                                      epilog="Created by OS")
@@ -34,6 +35,11 @@ if __name__ == "__main__":
     parser.add_argument("--init",
                         "-i",
                         help="Initialize a new file",
+                        action="store_true",
+                        default=False)
+    parser.add_argument("--ignore",
+                        "-g",
+                        help="If more devices are found than what is listed in the given file, ignore them.",
                         action="store_true",
                         default=False)
     parser.add_argument("--file",
@@ -49,12 +55,16 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    print("Reading RuuviTags for {} seconds".format(args.duration))
+    if args.debug:
+        print("Reading RuuviTags for {} seconds".format(args.duration))
 
     #TODO: Check if stderr gives "Command LE Set Scan Enable execution timed out" and if so, abort.
     #if it gives "Can't down device hci0: Device or resource busy (16" restart device?
     #Requires the installation of bluewalker
     command = 'sudo hciconfig hci0 down && sudo /home/pi/go/bin/bluewalker -device hci0 -ruuvi -duration {}'.format(args.duration)
+    currTime = datetime.now() #TODO: implement daylight savings
+    if args.debug:
+        print(currTime)
     #os.system(command)
     shOutput = subprocess.check_output(command, shell=True, universal_newlines=True)
 
@@ -66,7 +76,7 @@ if __name__ == "__main__":
     lines = shOutput.split("\n")
         
     bDevice=False
-    devices    = []
+    devOnAir   = []
     humidities = []
     temps      = []
     pressures  = []
@@ -79,8 +89,8 @@ if __name__ == "__main__":
         splitted = line.split(' ')
         if splitted[0].__contains__("Ruuvi"):
             dev = line[line.find("device")+7:line.find(",")]
-            if len(devices)==0:
-                devices.append(dev)
+            if len(devOnAir)==0:
+                devOnAir.append(dev)
                 humidities.append([])
                 temps.append([])
                 pressures.append([])
@@ -88,8 +98,8 @@ if __name__ == "__main__":
                 if args.debug:
                     print("Found a new device:",dev)
             else:
-                if devices.count(dev)==0:
-                    devices.append(dev)
+                if devOnAir.count(dev)==0:
+                    devOnAir.append(dev)
                     humidities.append([])
                     temps.append([])
                     pressures.append([])
@@ -107,19 +117,19 @@ if __name__ == "__main__":
             (pos, unit) = findUnit(splitted[1])
             if bCheckUnits:
                 units.append(unit)
-            humidities[devices.index(dev)].append(float(splitted[1][:pos]))
+            humidities[devOnAir.index(dev)].append(float(splitted[1][:pos]))
             (pos, unit) = findUnit(splitted[3])
             if bCheckUnits:
                 units.append(unit)
-            temps[devices.index(dev)].append(float(splitted[3][:pos]))
+            temps[devOnAir.index(dev)].append(float(splitted[3][:pos]))
             (pos, unit) = findUnit(splitted[5])
             if bCheckUnits:
                 units.append(unit)
-            pressures[devices.index(dev)].append(int(splitted[5][:pos]))
+            pressures[devOnAir.index(dev)].append(int(splitted[5][:pos]))
             (pos, unit) = findUnit(splitted[8])
             if bCheckUnits:
                 units.append(unit)
-            voltages[devices.index(dev)].append(int(splitted[8][:pos]))
+            voltages[devOnAir.index(dev)].append(int(splitted[8][:pos]))
             
     if args.debug:
         print("Printing medians and values gathered")
@@ -130,37 +140,94 @@ if __name__ == "__main__":
         print(median(pressures[0]),median(pressures[1]),pressures)
         print(median(voltages[0]),median(voltages[1]),voltages)
 
+    devInList    = []
+    devPosInList = []
     if args.init:
         print("Initializing a new file {}...".format(args.file))
-        #TODO: check if file exists already.
-        with open(args.file, 'w', encoding="utf-8") as fil:
-            for devnum,iDev in enumerate(devices):
-                fil.write(iDev)
-                if devnum!=len(devices)-1:
+        try:
+            with open(args.file, 'x', encoding="utf-8") as fil:
+                for devnum,iDev in enumerate(devOnAir):
+                    devPosInList.append(devnum)
+                    devInList.append(iDev)
+                    fil.write(iDev)
+                    if devnum!=len(devOnAir)-1:
+                        fil.write(',')
+                fil.write('\n')
+                fil.write("Date[yyyy-m-d],Time[h:m],")
+                for devnum,iDev in enumerate(devOnAir):
+                    for num,(iName,iUnit) in enumerate(zip(names,units)):
+                        fil.write("{}[{}]".format(iName,iUnit))
+                        if devnum!=len(devOnAir)-1 or num!=len(names)-1:
+                            fil.write(',')
+                fil.write('\n')
+        except OSError as err:
+            print("Error:",err)
+            exit()
+    else:
+        #TODO: Check that the units are the same.
+        try:
+            with open(args.file, 'r', encoding="utf-8") as fil:
+                for line in fil:
+                    readDews = line.split(',')
+                    for devNum,readDew in enumerate(readDews):
+                        #Last dev has a \n in the end which we remove
+                        if devNum==len(readDews)-1:
+                            readDew = readDew[:len(readDew)-1]
+                        try:
+                            devPosInList.append(devOnAir.index(readDew))
+                            devInList.append(readDew)
+                        except ValueError as err:
+                            print("Error:",err)
+                            print("Device",readDew,"not available. Check that device is on range and powered")
+                            exit()
+                    #The devOnAir are listed in the first line, we can break
+                    break
+        except OSError as err:
+            print("Error:",err)
+            exit()
+
+        #Here check that we have as many devices in list and on air
+        if len(devOnAir)!=len(devPosInList):
+            if args.ignore:
+                pass
+            else:
+                devCopy = devOnAir.copy()
+                for readDew in devInList:
+                    try:
+                        devCopy.remove(readDew)
+                    except ValueError as err:
+                        print(err)
+                        pass #We are fine if we cannot find everything in list
+                print("A device(s) was found which is not on the list:")
+                print(devCopy)
+                print("If you added a new device, please init a new file")
+                print("If you wish to ignore other devOnAir than the ones in the list, use --ignore flag")
+                exit()
+
+    #TODO: Need a check for the order of devOnAir.
+
+    if args.debug:
+        print("Device orders in list:",devPosInList)
+
+    #In format 2022-11-08 22:34:59.328995
+    dateSep = str(currTime).split(' ')
+    timeSep = dateSep[1].split(':')
+
+    try:
+        with open(args.file, 'a', encoding="utf-8") as fil:
+            fil.write("{},{}:{},".format(dateSep[0],timeSep[0],timeSep[1]))
+            for devnum,iDev in enumerate(devPosInList):
+                fil.write("{:.2f}".format(median(humidities[iDev])))
+                fil.write(',')
+                fil.write("{:.2f}".format(median(temps[iDev])))
+                fil.write(',')
+                fil.write("{:.0f}".format(median(pressures[iDev])))
+                fil.write(',')
+                fil.write("{:.0f}".format(median(voltages[iDev])))
+                if devnum!=len(devPosInList)-1:
                     fil.write(',')
             fil.write('\n')
-            for devnum,iDev in enumerate(devices):
-                for num,(iName,iUnit) in enumerate(zip(names,units)):
-                    fil.write("{}[{}]".format(iName,iUnit))
-                    if devnum!=len(devices)-1 or num!=len(names)-1:
-                        fil.write(',')
-            fil.write('\n')
-    else:
-        #Check that the devices and units are the same.
-        pass
-
-    #TODO: Need a check for the order of devices.
-
-    with open(args.file, 'a', encoding="utf-8") as fil:
-        for devnum,iDev in enumerate(devices):
-            fil.write("{:.2f}".format(median(humidities[devnum])))
-            fil.write(',')
-            fil.write("{:.2f}".format(median(temps[devnum])))
-            fil.write(',')
-            fil.write("{:.0f}".format(median(pressures[devnum])))
-            fil.write(',')
-            fil.write("{:.0f}".format(median(voltages[devnum])))
-            if devnum!=len(devices)-1:
-                fil.write(',')
-        fil.write('\n')
+    except OSError as err:
+        print("Error",err)
+        exit()
 
