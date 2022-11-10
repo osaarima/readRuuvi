@@ -71,7 +71,7 @@ if __name__ == "__main__":
     except subprocess.CalledProcessError as err:
         print("Error:",err)
         shOutput = subprocess.check_output("sudo shutdown -r +1", shell=True, universal_newlines=True)
-        with open("err.log", 'a', encoding="utf-8") as fil:
+        with open("/home/pi/readRuuvi/err.log", 'a', encoding="utf-8") as fil:
             fil.write("{} {} {}, {}\n".format(currTime,"Error:",err,shOutput))
         exit()
 
