@@ -8,7 +8,7 @@ def findUnit(strNum):
     sUnit = ''
     for iLetter in strNum:
         if not iLetter.isnumeric():
-            if iLetter!='.':
+            if iLetter!='.' and iLetter!='-':
                 sUnit += iLetter
                 if pos==-1:
                     pos=posNow
